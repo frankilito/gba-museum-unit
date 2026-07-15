@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
 import { HandheldModel } from './HandheldModel';
-import { lerp } from './spring';
+import { easeInOutCubic, lerp } from './spring';
 import type { ButtonState } from '../core/types';
 
 /**
@@ -14,13 +14,20 @@ export type LayoutMode = 'desktop' | 'portrait' | 'grip';
 
 /**
  * Landscape "grip mode" (phones only): a coarse pointer on a small screen
- * held sideways reframes the PLAYING camera so the device face fills the
- * viewport width — LCD centered and maximized, D-pad / A / B inside the
- * thumb zones. Detection reuses the existing layout pipeline (resize →
- * layout mode → camera goals); desktop viewports never resolve to 'grip'.
+ * held sideways reframes the camera so the device face covers the viewport
+ * on BOTH axes (width ≥98%, height ≥100% — shell edges may crop, the LCD is
+ * maximized, D-pad / A / B stay inside the thumb zones, no background paper
+ * visible). A grip session starts at the first cartridge insert (with a
+ * zoom + 90°-roll cinematic) and spans the whole play/swap flow, so carts
+ * can be changed without ever leaving the immersive framing. Detection
+ * reuses the existing layout pipeline; desktop viewports never resolve to
+ * 'grip' and never start a session (fine pointer → not grip-eligible).
  */
-const GRIP_HALF_WIDTH = 74; // device is 144.5mm wide → fills ≈98% of the view width
-const GRIP_TARGET = new THREE.Vector3(-0.8, 8, 13.35); // LCD plane, slight headroom
+const GRIP_HALF_WIDTH = 67.5; // device is 144.5mm wide → projection covers ≥98% of the view width
+const GRIP_TARGET = new THREE.Vector3(-0.8, 1.5, 13.35); // tuned: shell top rim just covers the viewport top
+const GRIP_DRAWER_LIFT = 14; // mm — drawer-open camera nudge brings the slot projection to the top screen edge
+const GRIP_DRAWER_ZOOM = 1.1; // radius scale while the cart drawer is open
+const GRIP_CINE_DUR = 0.8; // s — insert cinematic: zoom in + 90° roll about the view axis
 const GRIP_MAX_MIN_DIM = 500; // CSS px — phones, not tablets / desktop windows
 
 export class Scene3D {
@@ -50,7 +57,12 @@ export class Scene3D {
   private coarseMq = window.matchMedia('(pointer: coarse)');
   private smallScreen = false;
   private gripSuppressed = false; // user exited grip mode via the corner chip
+  private gripSession = false; // set on the first mobile insert; grip framing spans play + swaps
+  private gripDrawerOpen = false; // cart drawer summoned (camera nudges toward the slot)
   private gripRadius = 400; // recomputed from the aspect on every resize
+  private cineT = 1; // insert cinematic progress (1 = idle)
+  private cineDone = false; // the cinematic plays at most once per page session
+  private cineRoll = 0; // last applied view-axis roll in rad (test probe)
 
   private pointerNdc = new THREE.Vector2();
 
@@ -211,6 +223,30 @@ export class Scene3D {
     this.onLayout?.(this.layout);
   }
 
+  /**
+   * A cartridge insert on a grip-eligible phone starts a grip session and
+   * kicks the transition cinematic: the rig zooms toward the grip pose while
+   * the camera rolls 90°→0 about the view axis (~0.8s easeInOut), landing in
+   * the full-bleed grip view as BOOTING lights the screen. Played at most
+   * once per page session (cart swaps stay in grip without re-rolling);
+   * prefers-reduced-motion skips the roll and lands directly.
+   */
+  beginGripCinematic(): void {
+    this.gripSession = true;
+    // gripMode may flip on right here (landscape insert): re-evaluate layout
+    // consumers (the pouch parks off the right edge) even before PLAYING
+    this.onLayout?.(this.layout);
+    if (this.cineDone) return;
+    this.cineDone = true;
+    if (this.reducedMotion) return;
+    this.cineT = 0;
+  }
+
+  /** Cart drawer open/closed — nudges the grip camera toward the top slot. */
+  setGripDrawerOpen(on: boolean): void {
+    this.gripDrawerOpen = on;
+  }
+
   /** Coarse pointer on a phone-sized screen (orientation-independent). */
   get gripEligibleDevice(): boolean {
     return this.coarseMq.matches && this.smallScreen;
@@ -218,7 +254,23 @@ export class Scene3D {
 
   /** True while the immersive landscape grip framing is actually driving the camera. */
   get gripMode(): boolean {
-    return this.layout === 'grip' && this.playView && !this.gripSuppressed;
+    return this.layout === 'grip' && this.gripSession && !this.gripSuppressed;
+  }
+
+  /** True once a grip session started (first mobile insert), play or swap. */
+  get gripSessionActive(): boolean {
+    return this.gripSession;
+  }
+
+  /** Insert cinematic probes. */
+  get gripCineActive(): boolean {
+    return this.cineT < 1;
+  }
+  get gripCineDone(): boolean {
+    return this.cineDone;
+  }
+  get gripCineRoll(): number {
+    return this.cineRoll;
   }
 
   setDragFocus(on: boolean): void {
@@ -240,19 +292,21 @@ export class Scene3D {
       this.camera.lookAt(target.x, target.y, target.z);
       return;
     }
-    if (this.playView) {
-      if (this.layout === 'grip' && !this.gripSuppressed) {
-        // immersive grip: device face fills the viewport width, LCD centered
-        this.azGoal = 0;
-        this.elevGoal = 0.02;
-        this.radiusGoal = this.gripRadius;
-        this.camTargetGoal.copy(GRIP_TARGET);
-      } else {
-        this.azGoal = 0;
-        this.elevGoal = this.layout === 'portrait' ? 0.45 : 0.32;
-        this.radiusGoal = this.layout === 'portrait' ? 720 : 565;
-        this.camTargetGoal.set(0, 4, this.layout === 'portrait' ? 30 : 2);
-      }
+    if (this.layout === 'grip' && this.gripSession && !this.gripSuppressed) {
+      // immersive full-bleed grip: the device face covers both viewport axes.
+      // Holds through PLAYING and the OFF window of a cart swap alike — the
+      // swap never leaves the grip framing. While the cart drawer is open
+      // the camera nudges up toward the top slot so a drag can reach it.
+      this.azGoal = 0;
+      this.elevGoal = 0.02;
+      this.radiusGoal = this.gripRadius * (this.gripDrawerOpen ? GRIP_DRAWER_ZOOM : 1);
+      this.camTargetGoal.copy(GRIP_TARGET);
+      if (this.gripDrawerOpen) this.camTargetGoal.y += GRIP_DRAWER_LIFT;
+    } else if (this.playView) {
+      this.azGoal = 0;
+      this.elevGoal = this.layout === 'portrait' ? 0.45 : 0.32;
+      this.radiusGoal = this.layout === 'portrait' ? 720 : 565;
+      this.camTargetGoal.set(0, 4, this.layout === 'portrait' ? 30 : 2);
     } else {
       this.azGoal = this.layout === 'portrait' ? -0.16 : -0.38;
       this.elevGoal = 0.35;
@@ -284,6 +338,17 @@ export class Scene3D {
       this.camTarget.z + r * Math.cos(elev) * Math.cos(az),
     );
     this.camera.lookAt(this.camTarget);
+
+    // insert cinematic: roll about the view axis while the rig zooms toward
+    // the grip pose (90° → 0, easeInOut, ~GRIP_CINE_DUR seconds). Reduced
+    // motion never enters this branch (beginGripCinematic keeps cineT at 1).
+    if (this.cineT < 1) {
+      this.cineT = Math.min(1, this.cineT + dt / GRIP_CINE_DUR);
+      this.cineRoll = (1 - easeInOutCubic(this.cineT)) * (Math.PI / 2);
+    } else {
+      this.cineRoll = 0;
+    }
+    if (this.cineRoll > 1e-4) this.camera.rotateZ(-this.cineRoll);
   }
 
   // ---------- layout / resize ----------

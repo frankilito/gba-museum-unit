@@ -153,6 +153,15 @@ async function boot(): Promise<void> {
     fsm.transition('INSERTING');
     input.enabled = false;
     sfx.unlock();
+    if (scene3d.gripEligibleDevice) {
+      // phone insert = transition to landscape grip: attempt the real
+      // orientation lock inside this gesture chain (silent fallback to the
+      // rotate hint on iOS), play the zoom+roll cinematic either way, and
+      // slide the cart drawer out if it was open
+      tryLandscapeLock();
+      scene3d.beginGripCinematic();
+      setGripDrawerOpen(false);
+    }
 
     const romP = loadRomBytes(cart);
     const adapterP = ensureAdapter();
@@ -247,12 +256,66 @@ async function boot(): Promise<void> {
   const gripExit = document.getElementById('grip-exit')!;
   let gripHintDismissed = false; // session-only: never nags again once closed
 
+  // Insert on a phone = transition to landscape grip: try fullscreen +
+  // orientation.lock('landscape') inside the drag-release gesture chain
+  // (Chrome/Android grants it; iOS Safari has no such API and any rejection
+  // falls through silently to the rotate-hint flow). The zoom+roll cinematic
+  // plays regardless of the lock outcome.
+  const tryLandscapeLock = (): void => {
+    try {
+      const so = screen.orientation as (ScreenOrientation & { lock?: (o: string) => Promise<void> }) | undefined;
+      const attemptLock = (): void => {
+        try {
+          void so?.lock?.('landscape')?.catch(() => undefined);
+        } catch {
+          /* unsupported */
+        }
+      };
+      const reqFs = document.documentElement.requestFullscreen?.bind(document.documentElement);
+      if (reqFs) void reqFs().then(attemptLock, attemptLock);
+      else attemptLock();
+    } catch {
+      /* unsupported — the rotate-hint flow remains */
+    }
+  };
+  const releaseLandscapeLock = (): void => {
+    try {
+      (screen.orientation as (ScreenOrientation & { unlock?: () => void }) | undefined)?.unlock?.();
+    } catch {
+      /* unsupported */
+    }
+    try {
+      if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => undefined);
+    } catch {
+      /* best effort */
+    }
+  };
+
+  // Grip cart drawer: the pouch parks off the right screen edge; a leftward
+  // swipe from the right edge (or a quick horizontal flick) slides it in for
+  // cart swaps. Auto-closes on insert, on the chip, or after a timeout.
+  let gripDrawerTimer = 0;
+  const DRAWER_AUTOCLOSE_MS = 20000;
+  const setGripDrawerOpen = (on: boolean): void => {
+    window.clearTimeout(gripDrawerTimer);
+    carts.setGripPouchOpen(on);
+    scene3d.setGripDrawerOpen(on);
+    if (on) gripDrawerTimer = window.setTimeout(() => setGripDrawerOpen(false), DRAWER_AUTOCLOSE_MS);
+  };
+  const pokeGripDrawer = (): void => {
+    if (!carts.drawerOpen) return;
+    window.clearTimeout(gripDrawerTimer);
+    gripDrawerTimer = window.setTimeout(() => setGripDrawerOpen(false), DRAWER_AUTOCLOSE_MS);
+  };
+
   const syncGripUi = (): void => {
     const playing = fsm.state === 'PLAYING';
     const portrait = window.innerHeight > window.innerWidth;
     // the chip-exit opt-out resets once the grip context is left (rotation
     // back to portrait, or eject → next play session immerses again)
-    if (scene3d.layoutMode !== 'grip' || !playing) scene3d.setGripSuppressed(false);
+    if (scene3d.layoutMode !== 'grip' || fsm.state === 'OFF') scene3d.setGripSuppressed(false);
+    if (!scene3d.gripMode && carts.drawerOpen) setGripDrawerOpen(false);
+    if (scene3d.layoutMode !== 'grip') releaseLandscapeLock();
     gripHint.hidden = !(playing && portrait && scene3d.gripEligibleDevice && !gripHintDismissed);
     gripExit.hidden = !scene3d.gripMode;
     // grip view is played on the 3D buttons themselves — park the assist overlay
@@ -265,23 +328,10 @@ async function boot(): Promise<void> {
   });
   gripExit.addEventListener('click', () => {
     scene3d.setGripSuppressed(true);
+    setGripDrawerOpen(false);
+    releaseLandscapeLock();
     syncGripUi();
   });
-
-  // Android can hold the landscape orientation while playing, but only inside
-  // a user gesture and (on Chrome) only when fullscreen — try once, and let
-  // any rejection (or iOS Safari's missing API) fall through to the hint flow.
-  let orientLockTried = false;
-  const tryOrientationLock = (): void => {
-    if (orientLockTried || !scene3d.gripMode) return;
-    orientLockTried = true;
-    try {
-      const so = screen.orientation as (ScreenOrientation & { lock?: (o: string) => Promise<void> }) | undefined;
-      void so?.lock?.('landscape')?.catch(() => undefined);
-    } catch {
-      /* unsupported — the rotate-hint flow remains */
-    }
-  };
 
   scene3d.onLayout = (mode) => {
     carts.setLayout(mode);
@@ -437,6 +487,8 @@ async function boot(): Promise<void> {
   const activeButtons = new Map<number, { button: GBAButton; source: string }>();
   let blankDown: { x: number; y: number; id: string } | null = null;
   let cartPointer: number | null = null;
+  // grip drawer swipe: armed on unclaimed pointerdowns inside the grip view
+  let edgeSwipe: { id: number; x0: number; y0: number; t0: number; fromEdge: boolean } | null = null;
 
   const dpadDirection = (worldPoint: THREE.Vector3): GBAButton | null => {
     const local = scene3d.handheld.group.worldToLocal(worldPoint.clone());
@@ -451,7 +503,7 @@ async function boot(): Promise<void> {
 
   canvas.addEventListener('pointerdown', (e) => {
     sfx.unlock();
-    tryOrientationLock();
+    pokeGripDrawer(); // interacting with the open drawer holds the auto-close
     void ensureAdapter().catch(() => undefined); // warm the core on first gesture
     const ndc = scene3d.ndcFromClient(e.clientX, e.clientY);
 
@@ -482,6 +534,19 @@ async function boot(): Promise<void> {
         activeButtons.set(e.pointerId, { button, source });
         canvas.setPointerCapture(e.pointerId);
       }
+      return;
+    }
+
+    // nothing claimed the pointer: in the grip view this may be the start of
+    // a drawer swipe (leftward from the right screen edge, or a quick flick)
+    if (scene3d.gripMode) {
+      edgeSwipe = {
+        id: e.pointerId,
+        x0: e.clientX,
+        y0: e.clientY,
+        t0: performance.now(),
+        fromEdge: e.clientX >= window.innerWidth - 24,
+      };
     }
   });
 
@@ -489,6 +554,20 @@ async function boot(): Promise<void> {
     const ndc = scene3d.ndcFromClient(e.clientX, e.clientY);
     if (cartPointer === e.pointerId) {
       carts.dragMove(ndc);
+      return;
+    }
+    if (edgeSwipe && edgeSwipe.id === e.pointerId) {
+      const dx = e.clientX - edgeSwipe.x0;
+      const dy = e.clientY - edgeSwipe.y0;
+      // leftward drag from the right screen edge summons the cart drawer;
+      // while the drawer is open any rightward drag slides it back out
+      if (!carts.drawerOpen && edgeSwipe.fromEdge && dx <= -48 && Math.abs(dy) < 90) {
+        setGripDrawerOpen(true);
+        edgeSwipe = null;
+      } else if (carts.drawerOpen && dx >= 48 && Math.abs(dy) < 90) {
+        setGripDrawerOpen(false);
+        edgeSwipe = null;
+      }
       return;
     }
     const ab = activeButtons.get(e.pointerId);
@@ -535,6 +614,17 @@ async function boot(): Promise<void> {
     if (cartPointer === e.pointerId) {
       cartPointer = null;
       carts.endDrag();
+      return;
+    }
+    if (edgeSwipe && edgeSwipe.id === e.pointerId) {
+      const dx = e.clientX - edgeSwipe.x0;
+      const dy = e.clientY - edgeSwipe.y0;
+      const dt = performance.now() - edgeSwipe.t0;
+      // quick horizontal flick anywhere in the grip view toggles the drawer
+      if (dt < 320 && Math.abs(dx) >= 90 && Math.abs(dx) >= 2 * Math.abs(dy)) {
+        setGripDrawerOpen(dx < 0);
+      }
+      edgeSwipe = null;
       return;
     }
     const ab = activeButtons.get(e.pointerId);
@@ -641,6 +731,23 @@ async function boot(): Promise<void> {
     slotScreenPos: (): { x: number; y: number } => {
       const s = scene3d.projectToScreen(SLOT_APPROACH_POS.clone());
       return { x: s.x, y: s.y };
+    },
+    /** Device bounding box projected to CSS px (full-bleed grip assertion). */
+    deviceScreenBounds: (): { minX: number; maxX: number; minY: number; maxY: number } => {
+      const box = new THREE.Box3().setFromObject(scene3d.handheld.deviceGroup);
+      const out = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+      for (const x of [box.min.x, box.max.x]) {
+        for (const y of [box.min.y, box.max.y]) {
+          for (const z of [box.min.z, box.max.z]) {
+            const s = scene3d.projectToScreen(new THREE.Vector3(x, y, z));
+            out.minX = Math.min(out.minX, s.x);
+            out.maxX = Math.max(out.maxX, s.x);
+            out.minY = Math.min(out.minY, s.y);
+            out.maxY = Math.max(out.maxY, s.y);
+          }
+        }
+      }
+      return out;
     },
     /** World distance (mm) from a cart to the slot approach pose (magnetic-snap probe). */
     cartDistToSlot: (id: string): number | null => {

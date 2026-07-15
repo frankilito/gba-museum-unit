@@ -48,7 +48,7 @@ npm run build      # tsc --noEmit && vite build
 npm run preview    # serves dist/ on :5181 with the same isolation headers
 node tests/e2e.mjs # full acceptance suite (Chromium + vite preview, ~3 min)
 node tests/slowload.mjs # slow-network first-paint framing check (delayed GLB, 3 viewports)
-node tests/mobile-grip.mjs # iPhone viewport grip-mode suite (portrait hint + landscape immersion)
+node tests/mobile-grip.mjs # iPhone viewport grip-mode v2 suite (insert cinematic + full-bleed + drawer swap)
 node tests/mobile-insert.mjs # iPhone portrait CDP touch drag-insert (depth-gap magnetic snap)
 ```
 
@@ -58,16 +58,22 @@ the model. Drag carts with the mouse; drag the inserted cart upward to eject.
 
 Mobile: in portrait the cartridge pouch sits in front of the device — a
 touch drag on a cart pulls it toward the slot with a magnetic snap once your
-finger nears the slot on screen. While playing in portrait a small hint
-suggests rotating the phone.
-Held sideways, the view becomes an immersive **grip mode** — the device face
-fills the screen width with the LCD centered, the D-pad and A/B under your
-thumbs, and the cartridge pouch parked out of frame. Tap the physical 3D
-buttons to play, drag the exposed cartridge upward to eject (returns to the
-normal layout), or use the small EXIT GRIP chip in the corner. On Android the
-app may also try to lock the landscape orientation from a tap; if the browser
-refuses (or on iOS, where the API doesn't exist) nothing breaks — the
-rotate hint remains the fallback.
+finger nears the slot on screen. Inserting a cartridge on a phone starts the
+transition to landscape **grip mode**: the app tries fullscreen +
+`screen.orientation.lock('landscape')` inside the release gesture (Android;
+on iOS or any refusal the small rotate hint remains the fallback), and a
+short cinematic — camera zoom-in plus a 90° roll about the view axis — lands
+in the immersive view as the screen lights up (skipped under
+prefers-reduced-motion).
+Grip mode is full-bleed: the device face covers the whole screen on both
+axes (shell edges may crop, no background visible), the LCD is maximized,
+and the D-pad and A/B sit under your thumbs — tap the physical 3D buttons to
+play. The cartridge pouch parks off the right screen edge; a leftward swipe
+from the right edge (or a quick horizontal flick) slides it in as a drawer
+for cart swaps, and a rightward swipe, a successful insert, or a timeout
+slides it back out. Drag the exposed cartridge upward to eject — the swap
+flow never leaves the grip view — or use the small EXIT GRIP chip in the
+corner to return to the normal layout.
 
 Top bar: **SAVE / LOAD** — manual save-state snapshots of the running game
 (one per ROM, keyed by content hash in IndexedDB; enabled only while playing,

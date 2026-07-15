@@ -211,9 +211,11 @@ export class CartridgeManager {
 
   setLayout(mode: LayoutMode): void {
     if (mode === 'grip' && this.scene3d.gripMode) {
-      // immersive grip view: the pouch (and every cart at home) parks far
-      // below the framed device — the inserted cart is unaffected
-      this.pouchGoal.pos.set(0, -220, -60);
+      // immersive grip view: the pouch parks off the right edge of the screen
+      // (the inserted cart is unaffected). A right-edge swipe summons it back
+      // over the lower face as a drawer for cart swaps.
+      if (this.gripPouchOpen) this.pouchGoal.pos.set(2, 8, 50); // drawer in
+      else this.pouchGoal.pos.set(170, 8, 50); // parked fully off-screen right
       this.pouchGoal.rotY = 0;
     } else if (mode === 'portrait') {
       this.pouchGoal.pos.set(0, -36.0, 134);
@@ -236,15 +238,39 @@ export class CartridgeManager {
     }
   }
 
-  /** Pouch-local → scene position under the current layout. */
+  /** Pouch-local → scene position under the current (live, eased) pouch pose. */
   private homeWorld(local: THREE.Vector3): THREE.Vector3 {
-    const c = Math.cos(this.pouchGoal.rotY);
-    const s = Math.sin(this.pouchGoal.rotY);
+    const rotY = this.pouchGroup.rotation.y;
+    const c = Math.cos(rotY);
+    const s = Math.sin(rotY);
     return new THREE.Vector3(
-      this.pouchGoal.pos.x + local.x * c + local.z * s,
-      this.pouchGoal.pos.y + local.y,
-      this.pouchGoal.pos.z - local.x * s + local.z * c,
+      this.pouchGroup.position.x + local.x * c + local.z * s,
+      this.pouchGroup.position.y + local.y,
+      this.pouchGroup.position.z - local.x * s + local.z * c,
     );
+  }
+
+  // ---------- grip drawer ----------
+
+  private gripPouchOpen = false;
+
+  get drawerOpen(): boolean {
+    return this.gripPouchOpen;
+  }
+
+  /**
+   * Grip-mode cart drawer: slide the pouch in over the lower face (true) or
+   * back off the right screen edge (false). Only the goal changes here — the
+   * per-frame pouch easing performs the slide, and home carts follow the
+   * live pouch pose via homeWorld(). No-op outside an active grip session.
+   */
+  setGripPouchOpen(on: boolean): void {
+    if (this.gripPouchOpen === on) return;
+    this.gripPouchOpen = on;
+    if (this.scene3d.gripMode) {
+      this.pouchGoal.pos.set(on ? 2 : 170, 8, 50);
+      this.pouchGoal.rotY = 0;
+    }
   }
 
   // ---------- carts ----------
@@ -709,7 +735,8 @@ export class CartridgeManager {
     this.pouchGroup.position.lerp(this.pouchGoal.pos, 1 - Math.exp(-dt * 6));
     this.pouchGroup.rotation.y = lerp(this.pouchGroup.rotation.y, this.pouchGoal.rotY, 1 - Math.exp(-dt * 6));
 
-    // hover lift
+    // hover lift — home carts track the live pouch pose (x/z included), so
+    // they slide together with the pouch when the grip drawer opens/closes
     for (const [id, spring] of this.hoverLift) {
       const grp = this.cartGroups.get(id);
       if (!grp || grp.userData.inserted || this.drag?.cart.id === id) continue;
@@ -717,7 +744,8 @@ export class CartridgeManager {
       spring.update(dt);
       const home = this.cartHome.get(id);
       if (home && this.tweens.every((t) => (t as Tween & { cartId?: string }).cartId !== id)) {
-        grp.position.y = this.homeWorld(home.local).y + spring.value * 3;
+        const hw = this.homeWorld(home.local);
+        grp.position.set(hw.x, hw.y + spring.value * 3, hw.z);
       }
     }
 

@@ -1,6 +1,48 @@
 # GLB 集成进度（INTEGRATION-PROGRESS）
 
-最后更新：2026-07-15（**里程碑 10 完成**：portrait 触屏拖卡插入修复；新套件 mobile-insert 7/7；e2e **49/49**、mobile-grip 20/20、responsive 12/12、slowload 18/18 回归全过）
+最后更新：2026-07-15（**里程碑 11 完成**：移动端横握改版——插卡即转场（zoom+roll 90°）、双轴撑满取景、屏幕外卡带盒+侧滑唤出、grip 内换卡；mobile-grip 套件重写 38 断言；e2e **49/49** 原样全过 = 桌面零改动）
+
+## 里程碑 11：移动端横握改版（本轮，完成）
+
+用户反馈里程碑 9 的横握理解错了，按新规格重做：插卡即主动转场、横屏完全撑满不留背景边、收纳包藏屏幕外右侧+侧滑唤出、换卡全程不退出横握。全部逻辑仍只在 coarse+小屏路径；桌面 e2e 49/49 逐位不变。
+
+### ① 插卡即转场（INSERTING 开始）
+- `insertFlow` 同步前缀（= 拖卡松手的用户手势链内，transient activation 有效）新增：`tryLandscapeLock()`（`documentElement.requestFullscreen()` → 链内 `screen.orientation.lock('landscape')`，Android 有效；全链路 catch 静默，iOS 降级为旋转提示药丸）+ `scene3d.beginGripCinematic()` + 关抽屉。替代里程碑 9 的"canvas pointerdown 试探一次 lock"（已删除）。
+- **过场动画**：`Scene3D.cineT` 0→1（GRIP_CINE_DUR=0.8s，easeInOutCubic），每帧在 lookAt 后 `camera.rotateZ(-(1-k)·90°)`——绕视轴 roll 90°→0°，同时相机 rig 以既有 damp 从竖屏 play 机位推近到 grip 机位（zoom）。时长与 insertSequence 0.82s 同步，BOOTING 点亮时刚好到位。每场页面会话只播一次（`cineDone`）；Android 锁定成功→视口旋转→resize→grip 布局，动画与物理旋转叠加；iOS 未锁定→竖屏播一次（镜头语言即"该转了"），物理旋转后直接进入不重播。
+- **gripSession**：`beginGripCinematic` 置位（仅 gripEligibleDevice 会调用）；`gripMode = layout==='grip' && gripSession && !gripSuppressed`（不再依赖 playView）——换卡经过的 OFF 窗口保持横握取景，"换卡全程不退出横握"。suppressed 复位语义不变（离开 grip 上下文：转竖屏或弹卡 OFF）。fresh-load 横屏无 session → hero，行为同 m9。
+- prefers-reduced-motion：`beginGripCinematic` 直接标记 done、不启动 cineT → 零 roll 直接到位（套件断言 roll 恒 0）。
+
+### ② 完全撑满（双轴）
+- `GRIP_HALF_WIDTH 74→67.5`、`GRIP_TARGET (−0.8,8,13.35)→(−0.8,1.5,13.35)`（elev 0.02、应用层 clamp 0.05 不变）。844×390 实测（refit 吸附后）：设备 bbox 投影 x −54..909（覆盖宽 114% ≥98%）、y −72..473（覆盖高 140% ≥100%）→ 背景纸色不可见；LCD 95→**241px（×2.55 vs 竖屏 play）**；D-pad (103,153)、A (784,132)、B (707,159) 全部距边 ≥60px 且在左右拇指区；L/R、Start/Select 也仍在画面内。壳体上下沿按规格允许裁切（外露卡带只露出顶缘一条，56px 弹卡阈值不变，鼠标/捕获拖拽可达；真机从顶缘起拖受屏幕边界限制，EXIT GRIP chip 与抽屉换卡提供替代路径——如实备注）。
+- 新探针钩子 `deviceScreenBounds()`（deviceGroup bbox 八角投影 CSS px，撑满断言用）。
+
+### ③ 屏幕外卡带盒 + 侧滑唤出 + grip 内插卡
+- 收纳包 grip 停放位从 (0,−220,−60) 改为 **(170,8,50)（屏幕右缘外）**；抽屉唤出位 **(2,8,50)**（盖住下半屏，卡带在屏内可抓）。`CartridgeManager.setGripPouchOpen` 只改 goal，pouch 既有 per-frame 缓动执行滑入/滑出；`homeWorld` 改用 pouchGroup **实时**位姿（桌面/竖屏 setLayout 直吸后 goal≡live，逐位不变），home 卡带随包滑动。
+- **手势**：gripMode 下未被按键/卡带认领的 pointerdown 记 edgeSwipe；右缘 24px 内起滑、左滑 ≥48px（|dy|<90）→ 唤出；抽屉开时任意右滑 ≥48px → 收回；pointerup 快速水平甩动（<320ms、|dx|≥90、|dx|≥2|dy|）→ 切换。插卡成功 / EXIT GRIP / 离开 grip / 20s 超时（交互 poke 重置）自动收回。
+- **抽屉相机联动**：`scene3d.setGripDrawerOpen` → grip 机位 target.y **+14**、radius **×1.1**——把插槽 approach 投影拉到屏幕顶缘附近（实测 y≈−47px，配合 dragFocus 推近时更近），使 m10 的屏幕空间深度辅助（120px 窗口）在顶缘拖放时权重 w≈0.4+ 可达，世界 50mm 吸附 + 平面重瞄逐帧收缩 → CDP 触屏拖 cascade7（前排 z=63，深度差 69mm 触发辅助）实测 **snapDist 11.6mm < 20** 松手即 INSERTING→BOOTING→PLAYING。后排（upload 槽，z=37）走世界吸附收缩（真机 60Hz 约 0.4s 收敛，备注）。
+- 换卡流：PLAYING 上拖 56px 弹卡 → OFF（gripMode 保持、抽屉可开）→ 侧滑唤出 → 拖新卡到顶缘插入 → 全程横握取景不变、不重播转场、插卡成功抽屉自动滑出。
+
+### ④ 保留项
+56px 屏幕阈值弹卡（fromInserted 分支未动）、EXIT GRIP chip（退出到正常横屏 play 布局、游戏继续）、grip 隐藏 touch-zones、触键直接按、竖屏提示药丸（锁失败/iOS 兜底）——全部保留并通过套件断言。
+
+### ⑤ 桌面零改动（构造性）
+所有新逻辑门控：`gripEligibleDevice`（coarse+小屏）→ tryLandscapeLock/beginGripCinematic/setGripDrawerOpen；`gripMode` → edgeSwipe/抽屉位。桌面永不进 grip 布局、session 永不置位 → updateCamera 分支、setLayout、dragMove 与改动前逐位等价（cineT 恒 1、roll 恒 0）。e2e **49/49 原样全过**佐证。
+
+### 测试（已登记）
+- `tests/mobile-grip.mjs`（重写，**38 断言**）：转场（INSERTING 即 cineActive+roll≈90°、完成后 roll=0、旋转进入不重播、二次插卡不重播）、撑满（投影宽 ≥98% 高 ≥100%、LCD ×1.5+、按键区完整+拇指区）、提示药丸显示/关闭、触键边沿+行程、56px 弹卡且**停留** grip、侧滑唤出（drawerOpen+包滑到 x<6+插槽投影到顶缘+卡带可抓）、右滑收回（射线探测找无认领空位起滑——卡带上起拖是换卡手势）、CDP 触屏抽屉拖卡插入（snap<20 → PLAYING）、插卡后抽屉自动收回、EXIT GRIP（游戏继续+回正常机位 LCD<0.75×）、旋转循环重新沉浸、reduced-motion 跳过动画且撑满。截图 **15-grip-cinematic.png**（竖屏转场 roll 中段）、**16-grip-pouch-swipe.png**（抽屉唤出）、12/13 重拍。
+- 排障记录：SwiftShader 2–8fps 下 pouch 滑入需 ~6–8s 墙钟 → 抽屉超时设为 20s 且 pointerdown poke 重置；refit() 吸附机位消抖（改目标后先等 ≥3 帧让 goal 刷新）；关闭滑动手势起点必须在卡带投影外（卡带上起拖=换卡手势）。
+- 开发探针：tests/probe-grip2.mjs（grip 取景/抽屉/插卡数值）、tests/probe-raf.mjs（帧率诊断）。
+
+### 回归（最终构建）
+- `node tests/e2e.mjs` **49/49**（桌面基线原样全过 = 桌面零行为变化）
+- `node tests/mobile-grip.mjs` **38/38**
+- `node tests/mobile-insert.mjs` **7/7** · `node tests/responsive.mjs` **12/12** · `node tests/slowload.mjs` **18/18**
+- `npm run build` ✓
+
+### 里程碑 11 改动文件清单
+源码：src/scene/Scene3D.ts（gripSession/cine 转场/撑满机位/抽屉联动/gripMode 重定义）、src/scene/CartridgeManager.ts（抽屉位姿/setGripPouchOpen/homeWorld 实时包位/home 卡随包滑动）、src/main.ts（insertFlow 转场链/fullscreen+lock/释放、edgeSwipe 手势、抽屉开关+超时、syncGripUi 重写、deviceScreenBounds 钩子）
+测试：tests/mobile-grip.mjs（重写）、tests/probe-grip2.mjs / tests/probe-raf.mjs（探针）
+文档：README.md（Mobile 段落重写 + 套件说明）、INTEGRATION-PROGRESS.md（本文件）
 
 ## 里程碑 10：portrait 触屏拖卡插入修复（本轮，完成）
 
