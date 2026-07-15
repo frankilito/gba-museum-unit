@@ -13,7 +13,11 @@ browser.
 
 ## Live
 
-**https://deploymeum-unit-dekongzezm.cn-beijing-vpc.fcapp.run**
+**GitHub Pages: https://frankilito.github.io/gba-museum-unit/**
+(source: <https://github.com/frankilito/gba-museum-unit> — `main` = source,
+`gh-pages` = built bundle)
+
+Mirror (internal deploy service): **https://deploymeum-unit-igkonhfbzm.cn-beijing-vpc.fcapp.run**
 
 Deployed as a static bundle (`dist/`) via the internal deploy service
 (配方 B). First visit may show a LOADING chip while the 8 MB GLB downloads —
