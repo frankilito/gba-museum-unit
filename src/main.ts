@@ -642,6 +642,11 @@ async function boot(): Promise<void> {
       const s = scene3d.projectToScreen(SLOT_APPROACH_POS.clone());
       return { x: s.x, y: s.y };
     },
+    /** World distance (mm) from a cart to the slot approach pose (magnetic-snap probe). */
+    cartDistToSlot: (id: string): number | null => {
+      const grp = carts.getCartGroup(id);
+      return grp ? grp.position.distanceTo(SLOT_APPROACH_POS) : null;
+    },
     buttonScreenPos: (name: string): { x: number; y: number } | null => {
       const p = scene3d.handheld.getButtonWorldPos(name);
       if (!p) return null;

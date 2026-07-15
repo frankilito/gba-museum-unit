@@ -1,8 +1,34 @@
 # GLB 集成进度（INTEGRATION-PROGRESS）
 
-最后更新：2026-07-15（**里程碑 9 完成**：移动端横握沉浸模式；e2e **49/49**、mobile-grip 20/20、responsive 12/12、slowload 18/18、webkit-smoke 全过）
+最后更新：2026-07-15（**里程碑 10 完成**：portrait 触屏拖卡插入修复；新套件 mobile-insert 7/7；e2e **49/49**、mobile-grip 20/20、responsive 12/12、slowload 18/18 回归全过）
 
-## 里程碑 9：移动端「横握沉浸模式」（本轮，完成）
+## 里程碑 10：portrait 触屏拖卡插入修复（本轮，完成）
+
+### 根因
+`CartridgeManager.dragMove` 非插入态用"相机朝向平面"拖拽，卡带被锁在 home 深度。portrait 布局收纳包在机身前下方 z≈134，与插槽 approach（z≈−5.8）有 ~130mm 视轴深度差：屏幕空间拖拽永远进不了 50mm 世界吸附半径，endDrag 的 20mm 落入阈值物理不可达 → 必然"拖错回弹"（桌面收纳包 z≈6，深度差仅 ~12mm，所以桌面一直正常）。
+
+### 修复（src/scene/CartridgeManager.ts，仅 dragMove 非插入态分支）
+- 世界空间 50mm 吸附/20mm 落入逻辑**逐字保留**。新增**屏幕空间深度辅助**：每帧量 `|dragPlane.distanceToPoint(SLOT_APPROACH_POS)|`（视轴深度差），**仅当 > 50mm（=SNAP）时**启用辅助——卡带始终在拖拽平面内运动，该值布局内稳定：桌面 ~12mm 永不进此分支（桌面行为构造性逐位不变，非仅靠测试担保）；portrait ~113mm 启用。
+- 辅助逻辑：把 SLOT_APPROACH_POS 投影到屏幕，指针与投影的屏幕距离 < **120 CSS px** 时按 `w = f²·0.94 + 0.06`（f = 1 − d/120，与世界吸附同型）把拖拽 target 向 approach 世界坐标混合；贴死（d→0）时 w=1 → target=approach，endDrag 20mm 阈值真实可达（实测磁吸后 Δ=0.1mm）。远离时保持 1:1 平面手感，错误落点依旧回弹。
+- endDrag 未改：落入判定仍是世界 20mm + hasRom。
+- grip 核对：gripMode 时收纳包停放在 (0,−220,−60) 出画面，本无卡可拖（插入发生在进入 grip 前）；grip 布局+gripSuppressed 时收纳包回桌面位 (160,−36,6)、相机桌面参数 → 深度差 ~12mm 走桌面路径。辅助分支在 grip 永不触发，不报错。横握弹卡 56px 屏幕阈值不变。
+
+### 测试
+- `tests/mobile-insert.mjs`（新增，**7/7**）：iPhone 13 上下文（390×844、dsf3、hasTouch+isMobile），CDP `Input.dispatchTouchEvent` 真触屏拖拽——portrait 布局+收纳包 z=134 深度差断言 → 错误落点触屏拖回弹不启动 → cascade7 从收纳包拖到插槽投影点（中途等相机推近稳定后重瞄），断言磁吸发生（`cartDistToSlot` = 0.1mm < 20）→ 松手后 `fsm.onChange` 记录到 **INSERTING→BOOTING→PLAYING** 顺序序列 → 无页面错误。截图 tests/shots/14-mobile-portrait-touch-insert.png。
+- `main.ts` 新钩子（登记）：`cartDistToSlot(id)` —— 卡带到 SLOT_APPROACH_POS 的世界距离（磁吸探针）。
+- 排障记录：加载后相机向 portrait hero 缓动未完时投影漂移，touchStart 会落空 → 套件内 `waitCameraSettled`（投影稳定判定）后再发起拖拽。
+
+### 回归（最终构建）
+- `node tests/e2e.mjs` **49/49**（桌面基线原样全过 = 桌面零行为变化）
+- `node tests/responsive.mjs` **12/12** · `node tests/slowload.mjs` **18/18** · `node tests/mobile-grip.mjs` **20/20**
+- `npm run build` ✓
+
+### 里程碑 10 改动文件清单
+源码：src/scene/CartridgeManager.ts（dragMove 屏幕空间深度辅助）、src/main.ts（cartDistToSlot 钩子，已登记）
+测试：tests/mobile-insert.mjs（新增）
+文档：README.md（Mobile 段落触屏拖卡 + 测试命令）、INTEGRATION-PROGRESS.md（本文件）
+
+## 里程碑 9：移动端「横握沉浸模式」（完成）
 
 手机插卡游玩时横屏自动切换为横握视图：机身铺满视口宽度、LCD 居中最大化、D-pad/A/B 在左右拇指区、直接点按 3D 实体键。桌面端行为零改动（全部改动仅在 coarse+小屏+横屏路径生效）。
 

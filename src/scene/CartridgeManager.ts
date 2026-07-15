@@ -499,6 +499,34 @@ export class CartridgeManager {
       const w = f * f * 0.92 + 0.08;
       target.lerp(approach, w);
     }
+
+    // Screen-space depth assist. The camera-facing drag plane keeps the cart
+    // at its home depth along the view axis, so in layouts where the pouch
+    // sits far in front of the slot (portrait: z≈134 vs slot z≈−5.8 — a
+    // ~130mm view-axis gap) the 3D snap radius and the 20mm insert threshold
+    // are physically unreachable from a screen drag. When the view-axis gap
+    // exceeds the world snap radius, blend the target toward the approach
+    // pose by the pointer's screen distance to the slot projection (full
+    // blend when the pointer sits on it). The cart otherwise moves inside
+    // the drag plane, so the gap is layout-stable: on the desktop layout
+    // (gap ≈12mm) this branch never runs and the world-space snap above is
+    // bit-identical to before.
+    const depthGap = Math.abs(this.drag.plane.distanceToPoint(approach));
+    if (depthGap > SNAP) {
+      const proj = SLOT_APPROACH_POS.clone().project(this.scene3d.camera);
+      if (proj.z < 1) {
+        const px = ((ndc.x - proj.x) / 2) * window.innerWidth;
+        const py = ((ndc.y - proj.y) / 2) * window.innerHeight;
+        const screenDist = Math.hypot(px, py);
+        const SCREEN_SNAP = 120; // CSS px
+        if (screenDist < SCREEN_SNAP) {
+          const f = 1 - screenDist / SCREEN_SNAP; // 0..1
+          const w = f * f * 0.94 + 0.06;
+          target.lerp(approach, w);
+        }
+      }
+    }
+
     grp.position.copy(target);
     // rotation always corrects toward the insertion orientation
     grp.rotation.x = lerp(grp.rotation.x, 0, 0.25);

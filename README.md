@@ -45,13 +45,17 @@ npm run preview    # serves dist/ on :5181 with the same isolation headers
 node tests/e2e.mjs # full acceptance suite (Chromium + vite preview, ~3 min)
 node tests/slowload.mjs # slow-network first-paint framing check (delayed GLB, 3 viewports)
 node tests/mobile-grip.mjs # iPhone viewport grip-mode suite (portrait hint + landscape immersion)
+node tests/mobile-insert.mjs # iPhone portrait CDP touch drag-insert (depth-gap magnetic snap)
 ```
 
 Controls: arrows/WASD = D-pad · K/J = A/B · Q/E = L/R · Enter = Start ·
 Shift = Select (rebindable in ⚙ Settings). Or click the physical buttons on
 the model. Drag carts with the mouse; drag the inserted cart upward to eject.
 
-Mobile: while playing in portrait a small hint suggests rotating the phone.
+Mobile: in portrait the cartridge pouch sits in front of the device — a
+touch drag on a cart pulls it toward the slot with a magnetic snap once your
+finger nears the slot on screen. While playing in portrait a small hint
+suggests rotating the phone.
 Held sideways, the view becomes an immersive **grip mode** — the device face
 fills the screen width with the LCD centered, the D-pad and A/B under your
 thumbs, and the cartridge pouch parked out of frame. Tap the physical 3D
