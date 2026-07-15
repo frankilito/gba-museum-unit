@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#d8d4cc" />
+    <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'&gt;&lt;rect width='16' height='16' rx='3' fill='%234b4f92'/&gt;&lt;rect x='3' y='5' width='10' height='6' rx='1' fill='%2315161c'/&gt;&lt;/svg&gt;" />
+    <title>GBA · Museum Unit — Interactive Hardware Emulator</title>
+    <!--
+      The mGBA WASM core uses pthreads → SharedArrayBuffer → cross-origin isolation.
+      Dev/preview servers send COOP/COEP headers (vite.config.ts); on static hosts
+      this service worker (coi-serviceworker v0.1.7, MIT) re-fetches same-origin
+      assets with the required headers. No-op when already isolated.
+    -->
+    <script src="./coi-serviceworker.js"></script>
+    <script type="module" crossorigin src="./assets/index-6RCY3UDt.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Cs8l9ezu.css">
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+
+    <!-- Off-screen emulator stage: never display:none (would stall rAF / audio), just parked off-viewport -->
+    <div id="emu-stage" aria-hidden="true">
+      <canvas id="emu-canvas" width="240" height="160"></canvas>
+    </div>
+
+    <div id="hud">
+      <div id="keyhint" class="hint-line" role="status"></div>
+      <div id="toast" class="toast" role="alert"></div>
+    </div>
+
+    <!-- Minimal loading state: shown until the console GLB is fully loaded -->
+    <div id="boot-status" role="status">LOADING</div>
+
+    <!-- Portrait nudge on phones: rotate sideways for the immersive grip view.
+         Only shown while PLAYING in portrait on a coarse-pointer small screen. -->
+    <div id="grip-hint" role="status" hidden>
+      <span class="grip-hint-icon" aria-hidden="true">⟳</span>
+      <span>Rotate your phone to play in landscape</span>
+      <button id="grip-hint-close" aria-label="Dismiss">✕</button>
+    </div>
+
+    <!-- Grip mode exit chip (top-left corner; topbar stays top-right) -->
+    <button id="grip-exit" aria-label="Exit grip view" hidden>EXIT GRIP</button>
+
+    <div id="topbar">
+      <button id="btn-carts" class="icon-btn wide" title="Your cartridge slots" aria-label="Cartridge slots">CARTS</button>
+      <button id="btn-state-save" class="icon-btn wide" title="Save state (snapshot)" aria-label="Save state" disabled>SAVE</button>
+      <button id="btn-state-load" class="icon-btn wide" title="Load state (snapshot)" aria-label="Load state" disabled>LOAD</button>
+      <button id="btn-settings" class="icon-btn" title="Settings (keys)" aria-label="Settings">⚙</button>
+      <button id="btn-credits" class="icon-btn" title="Credits &amp; legal" aria-label="Credits">ⓘ</button>
+    </div>
+
+    <footer id="legal">
+      Unofficial interactive experiment. Not affiliated with, endorsed by, or sponsored by Nintendo.
+      “Game Boy Advance” is a trademark of its respective owner. No commercial ROMs or BIOS are bundled;
+      commercial titles can only be played from a local backup you import yourself — files never leave your browser.
+    </footer>
+
+    <!-- Settings: key rebinding only -->
+    <dialog id="dlg-settings" class="panel">
+      <h2>Key bindings</h2>
+      <p class="panel-note">Click a keycap, then press a key. Changes are stored locally on this device.</p>
+      <div id="rebind-grid"></div>
+      <div class="panel-actions">
+        <button id="btn-rebind-reset" class="text-btn">Reset defaults</button>
+        <button id="btn-settings-close" class="text-btn">Close</button>
+      </div>
+    </dialog>
+
+    <!-- Credits / legal -->
+    <dialog id="dlg-credits" class="panel">
+      <h2>Credits &amp; legal</h2>
+      <div id="credits-body"></div>
+      <div class="panel-actions">
+        <button id="btn-credits-close" class="text-btn">Close</button>
+      </div>
+    </dialog>
+
+    <!-- Cartridge slots: manage the two upload slots -->
+    <dialog id="dlg-carts" class="panel">
+      <h2>Your cartridges</h2>
+      <p class="panel-note">Two local upload slots. Import a .gba backup you legally own —
+      files are read with the File API and never leave this browser.</p>
+      <div id="carts-grid">
+        <div class="cart-row" id="cart-row-upload-1">
+          <div class="cart-row-info">
+            <span class="cart-slot-name">SLOT 1</span>
+            <span class="cart-row-title" id="cart-title-upload-1">LOAD YOUR ROM</span>
+          </div>
+          <button class="text-btn cart-choose" id="cart-choose-upload-1">Choose file</button>
+          <button class="text-btn cart-clear" id="cart-clear-upload-1">Clear</button>
+        </div>
+        <div class="cart-row" id="cart-row-upload-2">
+          <div class="cart-row-info">
+            <span class="cart-slot-name">SLOT 2</span>
+            <span class="cart-row-title" id="cart-title-upload-2">LOAD YOUR ROM</span>
+          </div>
+          <button class="text-btn cart-choose" id="cart-choose-upload-2">Choose file</button>
+          <button class="text-btn cart-clear" id="cart-clear-upload-2">Clear</button>
+        </div>
+      </div>
+      <div class="panel-actions">
+        <button id="btn-carts-close" class="text-btn">Close</button>
+      </div>
+    </dialog>
+
+    <input type="file" id="rom-file" accept=".gba" hidden />
+
+  </body>
+</html>
