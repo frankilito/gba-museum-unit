@@ -1,0 +1,22 @@
+{
+  "name": "gba-3d-museum",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Museum-scale 3D Game Boy Advance that runs real GBA ROMs in the browser (mGBA WASM). Unofficial interactive experiment, not affiliated with Nintendo.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test:e2e": "node tests/e2e.mjs"
+  },
+  "dependencies": {
+    "three": "0.185.1"
+  },
+  "devDependencies": {
+    "@types/three": "0.185.1",
+    "playwright": "^1.61.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.1.4"
+  }
+}

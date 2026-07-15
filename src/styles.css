@@ -1,0 +1,331 @@
+:root {
+  --ink: #232220;
+  --paper: #d8d4cc;
+  --panel-bg: rgba(248, 246, 241, 0.96);
+  --accent: #4b5191;
+  font-family: "Helvetica Neue", "Inter", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--paper);
+  color: var(--ink);
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
+#scene {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Parked off-screen but still rendered: display:none / visibility:hidden would
+   stall the emulator's requestAnimationFrame loop and audio scheduling. */
+#emu-stage {
+  position: fixed;
+  left: -400px;
+  top: -300px;
+  width: 240px;
+  height: 160px;
+  opacity: 0.01;
+  pointer-events: none;
+  z-index: -1;
+}
+#emu-canvas { width: 240px; height: 160px; image-rendering: pixelated; }
+
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.hint-line {
+  position: absolute;
+  left: 14px;
+  bottom: 30px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: rgba(35, 34, 32, 0.55);
+  background: rgba(248, 246, 241, 0.55);
+  padding: 4px 8px;
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
+  transition: opacity 1.2s ease;
+  max-width: min(92vw, 640px);
+  line-height: 1.5;
+}
+.hint-line.faded { opacity: 0; }
+.hint-line kbd {
+  font-family: inherit;
+  font-size: 10px;
+  background: rgba(35, 34, 32, 0.08);
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin: 0 1px;
+}
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 64px;
+  transform: translateX(-50%) translateY(8px);
+  font-size: 12px;
+  color: #f8f6f1;
+  background: rgba(35, 34, 32, 0.82);
+  padding: 6px 12px;
+  border-radius: 8px;
+  opacity: 0;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  white-space: nowrap;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+#boot-status {
+  position: fixed;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: rgba(35, 34, 32, 0.5);
+  background: rgba(248, 246, 241, 0.55);
+  padding: 4px 10px 4px 12px;
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
+  z-index: 12;
+  pointer-events: none;
+  transition: opacity 0.5s ease;
+}
+#boot-status.done { opacity: 0; }
+
+/* Phone portrait nudge → landscape grip mode. Restrained pill, never blocks
+   the scene: only its close button takes pointer events. */
+#grip-hint {
+  position: fixed;
+  left: 50%;
+  top: 44px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: rgba(35, 34, 32, 0.62);
+  background: rgba(248, 246, 241, 0.6);
+  padding: 5px 7px 5px 11px;
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  z-index: 30;
+  pointer-events: none;
+  white-space: nowrap;
+  transition: opacity 0.3s ease;
+}
+#grip-hint[hidden] { display: none; }
+.grip-hint-icon { font-size: 12px; line-height: 1; }
+#grip-hint-close {
+  pointer-events: auto;
+  border: none;
+  background: transparent;
+  color: rgba(35, 34, 32, 0.45);
+  font-size: 10px;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+#grip-hint-close:hover { color: rgba(35, 34, 32, 0.8); }
+
+/* Corner chip to leave the immersive grip view (topbar stays top-right). */
+#grip-exit {
+  position: fixed;
+  left: 10px;
+  top: 10px;
+  z-index: 30;
+  border: none;
+  border-radius: 8px;
+  background: rgba(248, 246, 241, 0.55);
+  color: rgba(35, 34, 32, 0.6);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 8px 10px;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+#grip-exit[hidden] { display: none; }
+#grip-exit:hover { background: rgba(248, 246, 241, 0.85); }
+
+#topbar {
+  position: fixed;
+  right: 10px;
+  top: 10px;
+  display: flex;
+  gap: 6px;
+  z-index: 20;
+}
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(248, 246, 241, 0.5);
+  color: rgba(35, 34, 32, 0.6);
+  font-size: 14px;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: background 0.2s ease;
+}
+.icon-btn:hover { background: rgba(248, 246, 241, 0.85); }
+.icon-btn:disabled { opacity: 0.35; cursor: default; }
+.icon-btn:disabled:hover { background: rgba(248, 246, 241, 0.5); }
+.icon-btn.wide {
+  width: auto;
+  padding: 0 8px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+#legal {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 4px;
+  text-align: center;
+  font-size: 8.5px;
+  line-height: 1.4;
+  color: rgba(35, 34, 32, 0.38);
+  pointer-events: none;
+  padding: 0 12px;
+  z-index: 10;
+}
+
+.panel {
+  border: none;
+  border-radius: 14px;
+  padding: 20px 22px;
+  background: var(--panel-bg);
+  color: var(--ink);
+  width: min(560px, 92vw);
+  max-height: 84vh;
+  overflow: auto;
+  box-shadow: 0 18px 60px rgba(35, 34, 32, 0.25);
+  font-size: 13px;
+}
+.panel::backdrop { background: rgba(35, 34, 32, 0.25); backdrop-filter: blur(2px); }
+.panel h2 { font-size: 15px; margin: 0 0 8px; letter-spacing: 0.02em; }
+.panel-note { font-size: 11px; color: rgba(35, 34, 32, 0.55); margin: 0 0 14px; }
+.panel-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.text-btn {
+  border: 1px solid rgba(35, 34, 32, 0.18);
+  background: transparent;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--ink);
+}
+.text-btn:hover { background: rgba(35, 34, 32, 0.06); }
+
+#rebind-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; }
+.rebind-row { display: flex; align-items: center; justify-content: space-between; }
+.rebind-row .label { font-size: 12px; color: rgba(35, 34, 32, 0.75); }
+.keycap-btn {
+  min-width: 64px;
+  border: 1px solid rgba(35, 34, 32, 0.22);
+  border-bottom-width: 2px;
+  background: #fbfaf7;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.keycap-btn.listening { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+#credits-body { font-size: 12px; line-height: 1.65; }
+#credits-body h3 { font-size: 12.5px; margin: 14px 0 4px; }
+#credits-body a { color: var(--accent); }
+#credits-body ul { margin: 4px 0; padding-left: 18px; }
+#credits-body .fine { font-size: 10.5px; color: rgba(35, 34, 32, 0.55); }
+
+#carts-grid { display: flex; flex-direction: column; gap: 10px; }
+.cart-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(35, 34, 32, 0.12);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.cart-row-info { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cart-slot-name { font-size: 9px; letter-spacing: 0.16em; color: rgba(35, 34, 32, 0.45); }
+.cart-row-title { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
+.cart-row-title.blank { color: rgba(35, 34, 32, 0.4); font-weight: 500; letter-spacing: 0.06em; }
+.cart-clear:disabled { opacity: 0.35; cursor: default; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hint-line, .toast, #grip-hint, #grip-exit { transition: none; }
+}
+
+/* Cartridge hover tooltip — light line, not a card panel */
+.cart-tooltip {
+  position: fixed;
+  transform: translate(-50%, -130%);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: rgba(35, 34, 32, 0.8);
+  background: rgba(248, 246, 241, 0.75);
+  padding: 3px 9px;
+  border-radius: 6px;
+  pointer-events: none;
+  white-space: nowrap;
+  transition: opacity 0.18s ease;
+  z-index: 12;
+  backdrop-filter: blur(3px);
+}
+
+/* Transparent touch assist zones (coarse pointers only) */
+#touch-zones {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  pointer-events: none;
+}
+.tz {
+  position: absolute;
+  pointer-events: auto;
+  border: 1.5px solid rgba(35, 34, 32, 0.22);
+  border-radius: 14px;
+  background: rgba(35, 34, 32, 0.05);
+  color: rgba(35, 34, 32, 0.4);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.tz.active { background: rgba(75, 81, 145, 0.18); border-color: rgba(75, 81, 145, 0.5); }
+#tz-dpad { left: 16px; bottom: 56px; width: 34vw; height: 34vw; max-width: 190px; max-height: 190px; }
+#tz-a { right: 16px; bottom: 150px; width: 22vw; height: 22vw; max-width: 120px; max-height: 120px; }
+#tz-b { right: 110px; bottom: 64px; width: 22vw; height: 22vw; max-width: 120px; max-height: 120px; }
+#tz-close {
+  right: 12px;
+  top: 48px;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+/* grip mode is played on the 3D buttons themselves — the overlay parks */
+#touch-zones.grip-hidden { display: none; }
+
